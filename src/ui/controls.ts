@@ -327,10 +327,16 @@ export class ChannelPanel {
     this.waveform.className = 'control-select';
     this.waveform.id = `ch${channel}-waveform`;
     waveLabel.htmlFor = this.waveform.id;
+    // Each option carries the mnemonic the instrument's own display shows, so a
+    // wrong code is immediately visible: pick "Triangle (TRGL)" and if the panel
+    // says anything but TRGL, the mapping is off. The codes for the basic shapes
+    // are documented but only partly verified - see docs/PROTOCOL.md.
     for (const info of WAVEFORMS) {
       const option = document.createElement('option');
       option.value = String(info.code);
-      option.textContent = info.drawable ? info.label : `${info.label} (shape unknown)`;
+      option.textContent = info.drawable
+        ? `${info.label} (${info.panel})`
+        : `${info.label} (${info.panel}, shape unknown)`;
       this.waveform.append(option);
     }
     this.waveform.addEventListener('change', () => {
@@ -342,7 +348,11 @@ export class ChannelPanel {
     const waveInputs = document.createElement('div');
     waveInputs.className = 'control-inputs';
     waveInputs.append(this.waveform);
-    waveRow.append(waveLabel, waveInputs);
+    const waveHint = document.createElement('span');
+    waveHint.className = 'control-hint';
+    waveHint.textContent =
+      'In brackets: what the instrument’s own display should read for this shape.';
+    waveRow.append(waveLabel, waveInputs, waveHint);
 
     this.frequency = new FrequencyRow(store, channel);
     this.amplitude = new SliderRow({

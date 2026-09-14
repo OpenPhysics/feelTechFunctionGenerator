@@ -95,14 +95,38 @@ The instrument's own 【WAVE】 toggle order, from the manual:
 | Code | Panel | Shape |
 |---|---|---|
 | 0 | `SINE` | sine — **verified** |
-| 1 | `SQUR` | square |
-| 2 | `PULS` | pulse |
-| 3 | `TRGL` | triangle |
-| 4 | `STW` | rising sawtooth |
-| 5 | `NSTW` | falling sawtooth |
-| 6 | `DC` | DC level (set by offset) |
-| 7 … | `PRE1` … | built-in presets, `PREn` = code `n + 6` — **verified** |
-| ? | `ARB1`–`ARB4` | user/arbitrary slots |
+| 1 | `SQUR` | square — *unverified* |
+| 2 | `PULS` | pulse — *unverified, and see below* |
+| 3 | `TRGL` | triangle — *unverified* |
+| 4 | `STW` | rising sawtooth — *unverified* |
+| 5 | `NSTW` | falling sawtooth — *unverified* |
+| 6 | `DC` | DC level, set by the offset — *unverified* |
+| 7 … | `PRE1` … | built-in presets, `PREn` = code `n + 6` — **verified at PRE1 and PRE11** |
+| ? | `ARB1`–`ARB4` | user/arbitrary slots — code unknown, above 17 |
+
+### Codes 1–6 are not yet confirmed
+
+Only code 0 (`SINE`) and the `PREn` run are confirmed. One panel reading of `bw2`
+reported `SINE` rather than the expected `PULS`, but that reading is not
+trustworthy: the two display lines are easy to confuse, and other readings in the
+same session turned out to be of the subsidiary channel.
+
+Two hypotheses were tested and eliminated:
+
+- **Zero-padding.** `bw2` and `bw02` behave identically; the instrument parses
+  either. Padding is not the explanation.
+- **Duty-acceptance fingerprinting.** The idea was that sine would refuse a duty
+  change while pulse-like shapes accept it, giving an automated discriminator.
+  It does not work: `cd` stores whatever duty you send for **every** waveform,
+  sine included. Duty is a stored parameter, not a shape-gated one.
+
+Since the instrument has no waveform readback, confirming these codes needs the
+front panel. The easiest route is the web UI itself: each waveform option is
+labelled with the mnemonic the panel should display (`Triangle (TRGL)`), so
+selecting one and glancing at the instrument confirms or refutes it in a second.
+
+If a mismatch turns up, fix the table in `src/device/types.ts` — it is the single
+place the mapping is defined, and `test/fy3200s.test.ts` guards it.
 
 ### Do not trust `python-feeltech` here
 
