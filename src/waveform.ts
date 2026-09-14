@@ -6,8 +6,8 @@
  * functions only need to describe shape.
  *
  * These are honest approximations of what the instrument emits, not captures of
- * it. The four user/arbitrary slots are deliberately absent: their contents live
- * in the instrument's memory and we have no way to know them.
+ * it. The four arbitrary slots and PRE11 are deliberately absent: their contents
+ * live in the instrument's memory and we have no way to know them.
  */
 
 import { Waveform, type WaveformCode } from './device/types.ts';
@@ -37,22 +37,6 @@ const triangle: ShapeFn = (p, duty) => {
   const d = Math.min(0.999, Math.max(0.001, duty));
   return p < d ? (p / d) * 2 - 1 : ((1 - p) / (1 - d)) * 2 - 1;
 };
-
-/**
- * Pulse. Distinct from Square on the instrument (separate 【WAVE】 position and
- * panel mnemonic PULS) but the same shape; duty is the point of it.
- */
-const pulse: ShapeFn = (p, duty) => (p < duty ? 1 : -1);
-
-const riseSawtooth: ShapeFn = (p) => p * 2 - 1;
-
-const fallSawtooth: ShapeFn = (p) => 1 - p * 2;
-
-/**
- * DC. The instrument outputs a steady level set by the offset, so the shape
- * contributes nothing and sampleVolts returns the offset alone.
- */
-const dc: ShapeFn = () => 0;
 
 /** Ramp up, hold, ramp down, hold - a trapezoid with 25% edges. */
 const trapezoid: ShapeFn = (p) => {
@@ -119,11 +103,7 @@ const fm: ShapeFn = (p) => Math.sin(TAU * 8 * p + 3 * Math.sin(TAU * p));
 const SHAPES: Partial<Record<WaveformCode, ShapeFn>> = {
   [Waveform.Sine]: sine,
   [Waveform.Square]: square,
-  [Waveform.Pulse]: pulse,
   [Waveform.Triangle]: triangle,
-  [Waveform.RiseSawtooth]: riseSawtooth,
-  [Waveform.FallSawtooth]: fallSawtooth,
-  [Waveform.Dc]: dc,
   [Waveform.Trapezoid]: trapezoid,
   [Waveform.NarrowPulse]: narrowPulse,
   [Waveform.Sinc]: sinc,

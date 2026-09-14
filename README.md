@@ -84,10 +84,11 @@ elsewhere:
 - The instrument has **undocumented readback commands** (`cf` for frequency, `cd`
   for duty cycle) that appear in no manual or library I could find.
 - Its replies carry **no line terminator**, so a newline-based reader hangs.
-- The widely-used `atx/python-feeltech` library has the **wrong waveform codes**
-  for the basic shapes.
 - Commands need **no inter-command delay**, despite existing libraries waiting
   50–500 ms.
+- The front panel's 【WAVE】 cycling order, which the manual documents, is **not**
+  the `bw` command's numbering. Reading one as the other yields a plausible-looking
+  table that selects the wrong shapes.
 
 To verify against your own unit, see the probing section of that document.
 

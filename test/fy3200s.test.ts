@@ -58,37 +58,35 @@ describe('amplitude, offset, duty, phase encoding', () => {
   it('encodes waveform codes', () => {
     expect(encodeWaveform(1, Waveform.Sine)).toBe('bw0');
     expect(encodeWaveform(1, Waveform.Square)).toBe('bw1');
-    expect(encodeWaveform(2, Waveform.Triangle)).toBe('dw3');
+    expect(encodeWaveform(2, Waveform.Triangle)).toBe('dw2');
   });
 });
 
 describe('waveform code table', () => {
-  it('follows the instrument manual, not python-feeltech', () => {
-    // python-feeltech claims 2=triangle and 3..6=arb1..4. The panel's own WAVE
-    // order says otherwise; getting this wrong emits the wrong shape entirely.
-    expect(Waveform.Pulse).toBe(2);
-    expect(Waveform.Triangle).toBe(3);
-    expect(Waveform.RiseSawtooth).toBe(4);
-    expect(Waveform.FallSawtooth).toBe(5);
-    expect(Waveform.Dc).toBe(6);
+  it('uses the codes read off the front panel', () => {
+    // Verified on an FY3200S-24M: selecting these codes displayed TRGL, ARB1,
+    // ARB2 and ARB3 respectively. Getting this wrong emits an entirely
+    // different shape, silently.
+    expect(Waveform.Sine).toBe(0);
+    expect(Waveform.Triangle).toBe(2);
+    expect(Waveform.Arb1).toBe(3);
+    expect(Waveform.Arb2).toBe(4);
+    expect(Waveform.Arb3).toBe(5);
   });
 
-  it('places the presets at PREn = n + 6, verified up to PRE11', () => {
-    // dw17 displayed PRE11 on the hardware, which pins the whole run: PRE1 = 7.
-    expect(Waveform.Lorentz).toBe(7);        // PRE1
-    expect(Waveform.Preset11).toBe(17);      // PRE11
+  it('does not follow the front panel WAVE cycling order', () => {
+    // The manual's WAVE sequence has Pulse at position 2 and Triangle at 3. That
+    // is the panel's browsing order and has nothing to do with the protocol
+    // numbering - a previous version of this file conflated the two and shipped
+    // the wrong codes. Triangle is 2 on the wire, whatever the panel cycles past.
+    expect(Waveform.Triangle).toBe(2);
+    expect(Object.keys(Waveform)).not.toContain('Pulse');
   });
 
-  it('does not guess at the ARB1-ARB4 codes', () => {
-    // The manual implies ARB1 = 17, but 17 is PRE11 on this unit. Shipping a
-    // guess would silently select the wrong waveform.
-    const labels = WAVEFORMS.map((w) => w.label);
-    expect(labels.some((l) => l.startsWith('Arbitrary'))).toBe(false);
-  });
-
-  it('keeps the PRE1-PRE10 presets on 7..16, the one range the library agrees on', () => {
-    expect(Waveform.Lorentz).toBe(7);
-    expect(Waveform.Fm).toBe(16);
+  it('places the presets at PREn = n + 6, verified at PRE1 and PRE11', () => {
+    expect(Waveform.Lorentz).toBe(7);    // PRE1
+    expect(Waveform.Fm).toBe(16);        // PRE10
+    expect(Waveform.Preset11).toBe(17);  // PRE11, read off the panel
   });
 
   it('exposes every code in the UI list exactly once', () => {
@@ -100,6 +98,13 @@ describe('waveform code table', () => {
   it('keeps drawable and shapeFor in agreement for every entry', () => {
     for (const info of WAVEFORMS) {
       expect(shapeFor(info.code) === null).toBe(!info.drawable);
+    }
+  });
+
+  it('cannot draw the arbitrary slots or the undocumented preset', () => {
+    for (const code of [Waveform.Arb1, Waveform.Arb2, Waveform.Arb3,
+                        Waveform.Arb4, Waveform.Preset11]) {
+      expect(shapeFor(code)).toBeNull();
     }
   });
 
@@ -121,18 +126,11 @@ describe('waveform shapes', () => {
     expect(sampleVolts(Waveform.Square, 0.4, 10, 0, 25)).toBeCloseTo(-5, 6);
   });
 
-  it('outputs a steady level for DC, set entirely by the offset', () => {
-    for (const phase of [0, 0.25, 0.5, 0.9]) {
-      expect(sampleVolts(Waveform.Dc, phase, 10, 3, 50)).toBeCloseTo(3, 6);
-    }
-  });
-
-  it('runs the sawtooths in opposite directions', () => {
-    const rise = sampleVolts(Waveform.RiseSawtooth, 0.9, 10, 0, 50)!;
-    const fall = sampleVolts(Waveform.FallSawtooth, 0.9, 10, 0, 50)!;
-    expect(rise).toBeGreaterThan(0);
-    expect(fall).toBeLessThan(0);
-    expect(rise).toBeCloseTo(-fall, 6);
+  it('skews a triangle with duty, the way the instrument does', () => {
+    // The manual shows a triangle at 51% duty, so duty is not square-only.
+    // At 50% the peak sits mid-cycle; at 25% it moves earlier.
+    expect(sampleVolts(Waveform.Triangle, 0.5, 10, 0, 50)).toBeCloseTo(5, 6);
+    expect(sampleVolts(Waveform.Triangle, 0.25, 10, 0, 25)).toBeCloseTo(5, 6);
   });
 
   it('wraps phase, so continuous animation never runs off the end', () => {
@@ -142,7 +140,8 @@ describe('waveform shapes', () => {
       .toBeCloseTo(sampleVolts(Waveform.Sine, 0.25, 10, 0, 50)!, 6);
   });
 
-  it('returns null for an unknown preset rather than inventing a shape', () => {
+  it('returns null for a stored waveform rather than inventing a shape', () => {
+    expect(sampleVolts(Waveform.Arb1, 0.3, 10, 0, 50)).toBeNull();
     expect(sampleVolts(Waveform.Preset11, 0.3, 10, 0, 50)).toBeNull();
   });
 
@@ -163,7 +162,7 @@ describe('limits', () => {
     expect(maxFrequencyHz('24M', Waveform.Sine)).toBe(24_000_000);
     expect(maxFrequencyHz('24M', Waveform.Square)).toBe(6_000_000);
     expect(maxFrequencyHz('24M', Waveform.Triangle)).toBe(6_000_000);
-    expect(maxFrequencyHz('24M', Waveform.Preset11)).toBe(6_000_000);
+    expect(maxFrequencyHz('24M', Waveform.Arb1)).toBe(6_000_000);
   });
 
   it('caps sine at the model, not at 24 MHz universally', () => {

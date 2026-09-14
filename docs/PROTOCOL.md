@@ -44,7 +44,7 @@ The channels are genuinely independent: setting channel 2's duty cycle with
 
 | Purpose | Syntax | Units | Example | Status |
 |---|---|---|---|---|
-| Waveform | `bw<code>` | see [Waveform codes](#waveform-codes) | `bw0` → sine | verified for 0 and 17 |
+| Waveform | `bw<code>` | see [Waveform codes](#waveform-codes) | `bw2` → triangle | **verified** |
 | Frequency | `bf<n>` | centihertz (0.01 Hz), **no zero-padding** | `bf100000` → 1 kHz | **verified** |
 | Amplitude | `ba<v>` | volts peak-to-peak, 2 decimals | `ba12.34` → 12.34 V | **verified** |
 | DC offset | `bo<v>` | volts, 2 decimals, signed | `bo0.00` → 0.00 V | verified for 0; negative form *unverified* |
@@ -90,58 +90,72 @@ Per the manual, duty applies to square, pulse **and triangle** (a triangle at
 
 ## Waveform codes
 
-The instrument's own 【WAVE】 toggle order, from the manual:
+**Verified on the hardware.** Codes 2–5 and 17 were read off the front panel.
 
-| Code | Panel | Shape |
-|---|---|---|
-| 0 | `SINE` | sine — **verified** |
-| 1 | `SQUR` | square — *unverified* |
-| 2 | `PULS` | pulse — *unverified, and see below* |
-| 3 | `TRGL` | triangle — *unverified* |
-| 4 | `STW` | rising sawtooth — *unverified* |
-| 5 | `NSTW` | falling sawtooth — *unverified* |
-| 6 | `DC` | DC level, set by the offset — *unverified* |
-| 7 … | `PRE1` … | built-in presets, `PREn` = code `n + 6` — **verified at PRE1 and PRE11** |
-| ? | `ARB1`–`ARB4` | user/arbitrary slots — code unknown, above 17 |
+| Code | Panel | Shape | Status |
+|---|---|---|---|
+| 0 | `SINE` | sine | **verified** |
+| 1 | `SQUR` | square | inferred |
+| 2 | `TRGL` | triangle | **verified** |
+| 3 | `ARB1` | user waveform 1 | **verified** |
+| 4 | `ARB2` | user waveform 2 | **verified** |
+| 5 | `ARB3` | user waveform 3 | **verified** |
+| 6 | `ARB4` | user waveform 4 | inferred from the run above |
+| 7 | `PRE1` | Lorentz pulse | documented |
+| 8 | `PRE2` | multitone | documented |
+| 9 | `PRE3` | random noise | documented |
+| 10 | `PRE4` | ECG | documented |
+| 11 | `PRE5` | trapezoid | documented |
+| 12 | `PRE6` | sinc | documented |
+| 13 | `PRE7` | narrow pulse | documented |
+| 14 | `PRE8` | Gaussian noise | documented |
+| 15 | `PRE9` | AM | documented |
+| 16 | `PRE10` | FM | documented |
+| 17 | `PRE11` | not in the manual | **verified to exist** |
 
-### Codes 1–6 are not yet confirmed
+So `PREn` = code `n + 6`, confirmed at both ends of the documented run (PRE1 = 7)
+and one past it (PRE11 = 17).
 
-Only code 0 (`SINE`) and the `PREn` run are confirmed. One panel reading of `bw2`
-reported `SINE` rather than the expected `PULS`, but that reading is not
-trustworthy: the two display lines are easy to confuse, and other readings in the
-same session turned out to be of the subsidiary channel.
+This agrees with `atx/python-feeltech`.
 
-Two hypotheses were tested and eliminated:
+### The panel's WAVE order is not the protocol's numbering
+
+This is the trap, and it cost this project a wrong table before the hardware
+settled it.
+
+The manual documents the order in which the front-panel 【WAVE】 button cycles
+through shapes: `SINE, SQUR, PULS, TRGL, STW, NSTW, DC, PRE1…`. It is tempting to
+read that as codes 0–6, especially since `PRE1` then lands on 7 and the whole
+`PREn = n + 6` run lines up perfectly.
+
+It is wrong. That sequence is the panel's *browsing* order and has no relationship
+to the `bw` command's numbering. On the wire, code 2 is **triangle**, and codes
+3–6 are the four **arbitrary** slots. The apparent corroboration from `PRE1 = 7`
+is a coincidence of both lists happening to reach the presets at the same point.
+
+Two hypotheses were tested and eliminated along the way:
 
 - **Zero-padding.** `bw2` and `bw02` behave identically; the instrument parses
-  either. Padding is not the explanation.
+  either. Padding was not the explanation for the confusion.
 - **Duty-acceptance fingerprinting.** The idea was that sine would refuse a duty
-  change while pulse-like shapes accept it, giving an automated discriminator.
-  It does not work: `cd` stores whatever duty you send for **every** waveform,
-  sine included. Duty is a stored parameter, not a shape-gated one.
+  change while pulse-like shapes accept it, giving an automated way to classify
+  codes without the panel. It does not work: `cd` reads back whatever duty you
+  last sent for **every** waveform, sine included. Duty is a stored parameter,
+  not a shape-gated one.
 
-Since the instrument has no waveform readback, confirming these codes needs the
-front panel. The easiest route is the web UI itself: each waveform option is
-labelled with the mnemonic the panel should display (`Triangle (TRGL)`), so
-selecting one and glancing at the instrument confirms or refutes it in a second.
+Since there is no waveform readback, the only way to confirm a code is to look at
+the panel. The web UI is built to make that cheap: every option is labelled with
+the mnemonic the instrument should display (`Triangle (TRGL)`), so a mismatch
+shows up in a glance.
 
-If a mismatch turns up, fix the table in `src/device/types.ts` — it is the single
-place the mapping is defined, and `test/fy3200s.test.ts` guards it.
+### Pulse and DC have no known code
 
-### Do not trust `python-feeltech` here
+The front panel can select `PULS` and `DC`, but neither appears in codes 0–17 on
+this unit. Their codes are unknown — do not guess. Reach them from the panel, or
+hunt with the raw command box.
 
-That library declares `TRIANGLE = 2` and `ARB1..ARB4 = 3..6`. The manual
-contradicts it, and the manual is corroborated: the library's own
-`LORENTZ..FM = 7..16` mapping is exactly `PRE1..PRE10`, which is the range both
-sources agree on.
-
-### The presets run past the manual
-
-The manual documents `PRE1`–`PRE10` (codes 7–16) and then shows `ARB1`–`ARB4`.
-On this unit, **code 17 displays `PRE11`**, so the preset list is longer than the
-manual's abridged table and the arbitrary slots sit somewhere above 17. Their
-exact codes are *unverified*; reach them with the raw command box rather than
-guessing.
+The table lives in one place, `src/device/types.ts`, and
+`test/fy3200s.test.ts` guards it.
 
 ## Queries
 

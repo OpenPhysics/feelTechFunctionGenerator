@@ -6,25 +6,27 @@ export type ChannelId = 1 | 2;
 /**
  * Waveform codes as sent in the `bw` / `dw` command.
  *
- * Taken from the instrument's own 【WAVE】 toggle order in the FY3200S manual,
- * where each shape is shown with the mnemonic the panel displays (SINE, SQUR,
- * PULS, TRGL, STW, NSTW, DC, then PRE1-PRE10, then ARB1-ARB4).
+ * VERIFIED ON HARDWARE (FY3200S-24M). Codes 2, 3, 4 and 5 were read off the
+ * front panel as TRGL, ARB1, ARB2 and ARB3 respectively, and code 17 as PRE11.
  *
- * NOTE: this deliberately disagrees with the widely-used `atx/python-feeltech`
- * library, which has `TRIANGLE = 2` and `ARB1..4 = 3..6`. The manual puts Pulse
- * at 2, Triangle at 3, the two sawtooths at 4 and 5, DC at 6, and the arbitrary
- * slots at 17-20. The manual is corroborated by the PRE1-PRE10 labels landing
- * exactly on 7-16, which is the one range the library agrees about. See
- * docs/PROTOCOL.md for the hardware verification.
+ * This matches `atx/python-feeltech`. It does NOT match the order in which the
+ * front-panel 【WAVE】 button cycles through shapes, which is where an earlier
+ * version of this file went wrong: the manual's WAVE sequence lists Pulse,
+ * Triangle, rising/falling sawtooth and DC at positions 2-6, but that is the
+ * panel's browsing order, not the protocol's numbering. The two are unrelated.
+ *
+ * Consequence worth knowing: the Pulse and DC shapes reachable from the front
+ * panel have no known code in this range. Do not guess at one - reach them from
+ * the panel, or hunt for the code with the raw command box.
  */
 export const Waveform = {
   Sine: 0,
   Square: 1,
-  Pulse: 2,
-  Triangle: 3,
-  RiseSawtooth: 4,
-  FallSawtooth: 5,
-  Dc: 6,
+  Triangle: 2,
+  Arb1: 3,
+  Arb2: 4,
+  Arb3: 5,
+  Arb4: 6,
   Lorentz: 7,        // PRE1
   Multitone: 8,      // PRE2
   RandomNoise: 9,    // PRE3
@@ -35,7 +37,7 @@ export const Waveform = {
   GaussNoise: 14,    // PRE8
   Am: 15,            // PRE9
   Fm: 16,            // PRE10
-  Preset11: 17,      // PRE11 - exists on this unit but not in the manual
+  Preset11: 17,      // PRE11 - present on this unit, absent from the manual
 } as const;
 
 export type WaveformCode = (typeof Waveform)[keyof typeof Waveform];
@@ -44,47 +46,45 @@ export interface WaveformInfo {
   code: WaveformCode;
   /** Shown in the UI. */
   label: string;
-  /** The mnemonic the instrument's own display shows, so the page and the panel agree. */
+  /** The mnemonic the instrument's own display shows, so the page and panel agree. */
   panel: string;
   /**
    * Whether the preview canvas can draw this shape from first principles.
    * False for anything whose shape lives in the instrument rather than in a
-   * formula we know.
+   * formula we know - the four user slots, and the one preset the manual omits.
    */
   drawable: boolean;
-  /** Duty cycle only means something for pulse-like shapes. */
+  /**
+   * Duty cycle only means something for some shapes. The manual documents it for
+   * square and triangle, and states it is invalid for sine.
+   *
+   * Note the instrument stores a duty value for every waveform regardless - `cd`
+   * reads back whatever you last sent even on a sine - so this flag is about
+   * which control to offer, not about what the hardware will accept.
+   */
   hasDuty: boolean;
 }
 
-/**
- * Ordered for the UI: the shapes a student actually reaches for come first,
- * then the exotic presets.
- *
- * The ARB1-ARB4 user slots are deliberately absent. The manual implies they
- * follow PRE10 at code 17, but code 17 displays PRE11 on this unit, so the
- * presets run past the manual's abridged list and the arbitrary slots are at
- * some higher code we have not identified. Offering a guess would select the
- * wrong waveform silently; the raw command box is the honest way to reach them.
- */
+/** Ordered for the UI: the everyday shapes, then the presets, then the user slots. */
 export const WAVEFORMS: readonly WaveformInfo[] = [
-  { code: Waveform.Sine,         label: 'Sine',           panel: 'SINE',  drawable: true,  hasDuty: false },
-  { code: Waveform.Square,       label: 'Square',         panel: 'SQUR',  drawable: true,  hasDuty: true  },
-  { code: Waveform.Triangle,     label: 'Triangle',       panel: 'TRGL',  drawable: true,  hasDuty: true  },
-  { code: Waveform.Pulse,        label: 'Pulse',          panel: 'PULS',  drawable: true,  hasDuty: true  },
-  { code: Waveform.RiseSawtooth, label: 'Rising sawtooth',panel: 'STW',   drawable: true,  hasDuty: false },
-  { code: Waveform.FallSawtooth, label: 'Falling sawtooth',panel: 'NSTW', drawable: true,  hasDuty: false },
-  { code: Waveform.Dc,           label: 'DC level',       panel: 'DC',    drawable: true,  hasDuty: false },
-  { code: Waveform.Trapezoid,    label: 'Trapezoid',      panel: 'PRE5',  drawable: true,  hasDuty: false },
-  { code: Waveform.NarrowPulse,  label: 'Narrow pulse',   panel: 'PRE7',  drawable: true,  hasDuty: true  },
-  { code: Waveform.Sinc,         label: 'Sinc',           panel: 'PRE6',  drawable: true,  hasDuty: false },
-  { code: Waveform.Lorentz,      label: 'Lorentz pulse',  panel: 'PRE1',  drawable: true,  hasDuty: false },
-  { code: Waveform.Ecg,          label: 'ECG',            panel: 'PRE4',  drawable: true,  hasDuty: false },
-  { code: Waveform.Multitone,    label: 'Multitone',      panel: 'PRE2',  drawable: true,  hasDuty: false },
-  { code: Waveform.RandomNoise,  label: 'Random noise',   panel: 'PRE3',  drawable: true,  hasDuty: false },
-  { code: Waveform.GaussNoise,   label: 'Gaussian noise', panel: 'PRE8',  drawable: true,  hasDuty: false },
-  { code: Waveform.Am,           label: 'AM',             panel: 'PRE9',  drawable: true,  hasDuty: false },
-  { code: Waveform.Fm,           label: 'FM',             panel: 'PRE10', drawable: true,  hasDuty: false },
-  { code: Waveform.Preset11,     label: 'Preset 11',      panel: 'PRE11', drawable: false, hasDuty: false },
+  { code: Waveform.Sine,        label: 'Sine',           panel: 'SINE',  drawable: true,  hasDuty: false },
+  { code: Waveform.Square,      label: 'Square',         panel: 'SQUR',  drawable: true,  hasDuty: true  },
+  { code: Waveform.Triangle,    label: 'Triangle',       panel: 'TRGL',  drawable: true,  hasDuty: true  },
+  { code: Waveform.Trapezoid,   label: 'Trapezoid',      panel: 'PRE5',  drawable: true,  hasDuty: false },
+  { code: Waveform.NarrowPulse, label: 'Narrow pulse',   panel: 'PRE7',  drawable: true,  hasDuty: false },
+  { code: Waveform.Sinc,        label: 'Sinc',           panel: 'PRE6',  drawable: true,  hasDuty: false },
+  { code: Waveform.Lorentz,     label: 'Lorentz pulse',  panel: 'PRE1',  drawable: true,  hasDuty: false },
+  { code: Waveform.Ecg,         label: 'ECG',            panel: 'PRE4',  drawable: true,  hasDuty: false },
+  { code: Waveform.Multitone,   label: 'Multitone',      panel: 'PRE2',  drawable: true,  hasDuty: false },
+  { code: Waveform.RandomNoise, label: 'Random noise',   panel: 'PRE3',  drawable: true,  hasDuty: false },
+  { code: Waveform.GaussNoise,  label: 'Gaussian noise', panel: 'PRE8',  drawable: true,  hasDuty: false },
+  { code: Waveform.Am,          label: 'AM',             panel: 'PRE9',  drawable: true,  hasDuty: false },
+  { code: Waveform.Fm,          label: 'FM',             panel: 'PRE10', drawable: true,  hasDuty: false },
+  { code: Waveform.Preset11,    label: 'Preset 11',      panel: 'PRE11', drawable: false, hasDuty: false },
+  { code: Waveform.Arb1,        label: 'Arbitrary 1',    panel: 'ARB1',  drawable: false, hasDuty: false },
+  { code: Waveform.Arb2,        label: 'Arbitrary 2',    panel: 'ARB2',  drawable: false, hasDuty: false },
+  { code: Waveform.Arb3,        label: 'Arbitrary 3',    panel: 'ARB3',  drawable: false, hasDuty: false },
+  { code: Waveform.Arb4,        label: 'Arbitrary 4',    panel: 'ARB4',  drawable: false, hasDuty: false },
 ];
 
 export function waveformInfo(code: WaveformCode): WaveformInfo {
