@@ -68,11 +68,16 @@ instrument:
 
 | File | Role |
 |---|---|
+| `src/main.ts` | Wiring only: DOM lookup, handlers, state ↔ serial glue. |
+| `src/state.ts` | Single source of truth for what the instrument has been told; diffed to send only changed commands. |
+| `src/device/types.ts` | Shared vocabulary: models, waveforms, settings. |
 | `src/device/fy3200s.ts` | Pure command encoding. State in, command strings out. No I/O. |
 | `src/device/limits.ts` | What the hardware can actually do, per model and per waveform. |
 | `src/device/serial.ts` | The only file that touches `navigator.serial`. |
 | `src/waveform.ts` | Pure waveform maths for the preview. |
 | `src/ui/scope.ts` | Canvas rendering. |
+| `src/ui/controls.ts` | Per-channel controls (slider plus numeric box) and presets. |
+| `src/ui/log.ts` | The on-page log of every byte sent and received. |
 | `tools/probe.py` | Talks to real hardware, for verifying the protocol. |
 
 ## The protocol
