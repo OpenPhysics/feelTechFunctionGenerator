@@ -4,17 +4,21 @@
   "version": "1.0.0",
   "type": "module",
   "description": "Browser control panel for the FeelTech FY3200S function generator over Web Serial",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck",
     "test": "vitest run"
   },
   "devDependencies": {
     "@types/w3c-web-serial": "^1.0.7",
     "typescript": "~6.0.2",
     "vite": "^8.3.0",
-    "vitest": "^3.2.4"
+    "vitest": "^5.0.0"
   }
 }
