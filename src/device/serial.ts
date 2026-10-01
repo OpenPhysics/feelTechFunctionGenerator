@@ -234,7 +234,13 @@ export class Fy3200sTransport {
         // Re-read length each pass: entries can be replaced while we wait.
         const entry = this.queue.shift();
         if (!entry) break;
-        await this.serialise(() => this.writeRaw(entry.command));
+        try {
+          await this.serialise(() => this.writeRaw(entry.command));
+        } catch (error) {
+          this.handlers.onError?.(asError(error).message);
+          await this.teardown('serial connection lost');
+          break;
+        }
         await delay(COMMAND_INTERVAL_MS);
       }
     } finally {
