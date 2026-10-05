@@ -8,12 +8,12 @@
  */
 
 import {
-  channelKey, defaultInstrumentState,
-  type ChannelId, type ChannelState, type InstrumentState,
+  Waveform, channelKey, defaultInstrumentState,
+  type ChannelId, type ChannelState, type InstrumentState, type WaveformCode,
 } from './device/types.ts';
 import {
-  clampAmplitude, clampDuty, clampFrequency, clampOffset, clampPhase,
-  DEFAULT_MODEL, type ModelId,
+  clampDuty, clampFrequency, clampOutput, clampPhase,
+  DEFAULT_MODEL, FREQ_STEP_HZ, MODELS, maxFrequencyHz, type ModelId,
 } from './device/limits.ts';
 
 export interface AppState {
@@ -26,6 +26,16 @@ export interface AppState {
 export type Listener = (next: AppState, prev: AppState) => void;
 
 const STORAGE_KEY = 'fy3200s.settings.v1';
+
+const WAVEFORM_CODES = new Set<number>(Object.values(Waveform));
+
+function isModelId(value: unknown): value is ModelId {
+  return typeof value === 'string' && Object.hasOwn(MODELS, value);
+}
+
+function isWaveformCode(value: unknown): value is WaveformCode {
+  return typeof value === 'number' && WAVEFORM_CODES.has(value);
+}
 
 function initialState(): AppState {
   return {
@@ -81,9 +91,22 @@ export class Store {
   private normalise(draft: AppState): void {
     for (const key of ['ch1', 'ch2'] as const) {
       const ch = draft.instrument[key];
-      ch.frequencyHz = clampFrequency(ch.frequencyHz, draft.model, ch.waveform);
-      ch.amplitudeVpp = clampAmplitude(ch.amplitudeVpp);
-      ch.offsetV = clampOffset(ch.offsetV);
+      const requestedHz = ch.frequencyHz;
+      const cap = maxFrequencyHz(draft.model, ch.waveform);
+      const reducedNow = Number.isFinite(requestedHz) && requestedHz > cap;
+      ch.frequencyHz = clampFrequency(requestedHz, draft.model, ch.waveform);
+      // A later edit that leaves the frequency sitting on the ceiling must keep
+      // the banner. Comparing the stored value with the cap can never succeed,
+      // because this function has already lowered it.
+      if (reducedNow) ch.frequencyReduced = true;
+      else if (!Number.isFinite(requestedHz) || requestedHz < cap - FREQ_STEP_HZ / 2) {
+        ch.frequencyReduced = false;
+      } else {
+        ch.frequencyReduced = ch.frequencyReduced === true;
+      }
+      const levels = clampOutput(ch.amplitudeVpp, ch.offsetV);
+      ch.amplitudeVpp = levels.amplitudeVpp;
+      ch.offsetV = levels.offsetV;
       ch.dutyPct = clampDuty(ch.dutyPct);
       ch.phaseDeg = clampPhase(ch.phaseDeg);
     }
@@ -106,8 +129,13 @@ export class Store {
       if (!raw) return;
       const saved = JSON.parse(raw) as Partial<AppState>;
       const merged: AppState = { ...initialState(), ...saved };
-      // Guard against a stale or hand-edited payload.
+      // Guard against a stale or hand-edited payload. An unknown model makes
+      // maxFrequencyHz return undefined and the next command carries NaN;
+      // an unknown waveform code is the same class of failure.
       if (!merged.instrument?.ch1 || !merged.instrument?.ch2) return;
+      if (!isModelId(merged.model)) return;
+      if (!isWaveformCode(merged.instrument.ch1.waveform)) return;
+      if (!isWaveformCode(merged.instrument.ch2.waveform)) return;
       this.normalise(merged);
       this.state = merged;
     } catch {

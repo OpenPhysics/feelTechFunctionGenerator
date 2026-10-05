@@ -364,7 +364,9 @@ export class Scope {
       if (id === 2 && !this.options.ch2Enabled) continue;
       const ch = state[channelKey(id)];
       const cap = maxFrequencyHz(this.options.model, ch.waveform);
-      if (ch.frequencyHz > cap) {
+      // frequencyHz has already been lowered to `cap`, so compare the flag
+      // recorded at clamp time rather than the stored number.
+      if (ch.frequencyReduced) {
         overspec.push(`CH${id} above ${formatHertz(cap)} spec for this waveform`);
       }
     }

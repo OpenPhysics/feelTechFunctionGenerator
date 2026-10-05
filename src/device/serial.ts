@@ -57,6 +57,11 @@ export class Fy3200sTransport {
   private busy: Promise<unknown> = Promise.resolve();
 
   private status: ConnectionStatus = 'disconnected';
+  /** One open at a time, shared by connect() and tryReconnect(). */
+  private connectInFlight: Promise<boolean> | null = null;
+  /** Set synchronously at the start of teardown so the reader cannot re-enter. */
+  private teardownStarted = false;
+  private teardownTask: Promise<void> | null = null;
 
   constructor(private handlers: TransportHandlers = {}) {
     if (isWebSerialSupported()) {
@@ -78,11 +83,37 @@ export class Fy3200sTransport {
   }
 
   private handleUnplug = (event: Event): void => {
-    // Only care if it was OUR port that vanished.
-    if (this.port && (event as { target?: unknown }).target === this.port) {
+    // Disconnect is delivered on navigator.serial, so event.target is that
+    // object. The port that left is event.port (SerialConnectionEvent). The
+    // installed Web Serial types still describe the listener as a plain Event.
+    const port = (event as Event & { port?: SerialPort }).port;
+    if (this.port && port === this.port) {
       void this.teardown('the instrument was unplugged');
     }
   };
+
+  /**
+   * Run `body` as the only port-open in flight. A second caller gets the same
+   * promise instead of opening the port again.
+   *
+   * The lock is assigned before `body` starts, so connect() and tryReconnect()
+   * cannot both pass the "nothing in flight" check.
+   */
+  private startConnect(body: () => Promise<boolean>): Promise<boolean> {
+    if (this.connectInFlight) return this.connectInFlight;
+    let begin!: () => void;
+    const gate = new Promise<boolean>((resolve, reject) => {
+      begin = () => {
+        body().then(resolve, reject);
+      };
+    });
+    const tracked = gate.finally(() => {
+      if (this.connectInFlight === tracked) this.connectInFlight = null;
+    });
+    this.connectInFlight = tracked;
+    begin();
+    return tracked;
+  }
 
   /**
    * Show the browser's port picker and open the chosen port.
@@ -96,18 +127,24 @@ export class Fy3200sTransport {
       this.setStatus('unsupported');
       throw new Error('This browser has no Web Serial API. Use Chrome or Edge on desktop.');
     }
-    this.setStatus('connecting');
-    try {
-      const port = await navigator.serial.requestPort({
-        // Narrow the picker to the CH340 bridge inside the FY3200S, so students
-        // are not choosing between every COM port on the machine.
-        filters: [{ usbVendorId: USB_VENDOR_ID, usbProductId: USB_PRODUCT_ID }],
-      });
-      await this.openPort(port);
-    } catch (error) {
-      this.setStatus('disconnected');
-      throw asError(error);
-    }
+    // Ignore a click that arrives while a reconnect (or another connect) is
+    // already opening a port. The in-flight attempt reports its own result.
+    if (this.connectInFlight || this.status === 'connecting') return;
+    await this.startConnect(async () => {
+      this.setStatus('connecting');
+      try {
+        const port = await navigator.serial.requestPort({
+          // Narrow the picker to the CH340 bridge inside the FY3200S, so students
+          // are not choosing between every COM port on the machine.
+          filters: [{ usbVendorId: USB_VENDOR_ID, usbProductId: USB_PRODUCT_ID }],
+        });
+        await this.openPort(port);
+        return true;
+      } catch (error) {
+        this.setStatus('disconnected');
+        throw asError(error);
+      }
+    });
   }
 
   /**
@@ -116,20 +153,24 @@ export class Fy3200sTransport {
    */
   async tryReconnect(): Promise<boolean> {
     if (!isWebSerialSupported()) return false;
-    const ports = await navigator.serial.getPorts();
-    const match = ports.find((p) => {
-      const info = p.getInfo();
-      return info.usbVendorId === USB_VENDOR_ID && info.usbProductId === USB_PRODUCT_ID;
+    if (this.connectInFlight || this.status === 'connecting') return false;
+    if (this.isConnected) return true;
+    return this.startConnect(async () => {
+      const ports = await navigator.serial.getPorts();
+      const match = ports.find((p) => {
+        const info = p.getInfo();
+        return info.usbVendorId === USB_VENDOR_ID && info.usbProductId === USB_PRODUCT_ID;
+      });
+      if (!match) return false;
+      try {
+        this.setStatus('connecting');
+        await this.openPort(match);
+        return true;
+      } catch {
+        this.setStatus('disconnected');
+        return false;
+      }
     });
-    if (!match) return false;
-    try {
-      this.setStatus('connecting');
-      await this.openPort(match);
-      return true;
-    } catch {
-      this.setStatus('disconnected');
-      return false;
-    }
   }
 
   private async openPort(port: SerialPort): Promise<void> {
@@ -140,14 +181,38 @@ export class Fy3200sTransport {
       parity: 'none',
       flowControl: 'none',
     });
-    this.port = port;
-    this.writer = port.writable?.getWriter() ?? null;
-    if (!this.writer) throw new Error('serial port is not writable');
-    this.readLoop = this.pumpReader();
-    // The CH340 needs a moment after open, and the instrument drops a command
-    // sent immediately after the port comes up.
-    await delay(300);
-    this.setStatus('connected');
+    try {
+      this.port = port;
+      this.writer = port.writable?.getWriter() ?? null;
+      if (!this.writer) throw new Error('serial port is not writable');
+      this.readLoop = this.pumpReader();
+      // The CH340 needs a moment after open, and the instrument drops a command
+      // sent immediately after the port comes up.
+      await delay(300);
+      this.setStatus('connected');
+    } catch (error) {
+      await this.abortOpen(port);
+      throw error;
+    }
+  }
+
+  /** Close a port that open() succeeded on but that we never committed. */
+  private async abortOpen(port: SerialPort): Promise<void> {
+    this.port = null;
+    try {
+      this.writer?.releaseLock();
+    } catch { /* ignore */ }
+    this.writer = null;
+    try {
+      await this.reader?.cancel();
+    } catch { /* ignore */ }
+    try {
+      await this.readLoop;
+    } catch { /* ignore */ }
+    this.readLoop = null;
+    try {
+      await port.close();
+    } catch { /* ignore */ }
   }
 
   private async pumpReader(): Promise<void> {
@@ -166,9 +231,13 @@ export class Fy3200sTransport {
         }
       }
     } catch (error) {
-      // A read error during teardown is expected; report anything else.
-      if (this.status === 'connected') {
-        this.handlers.onError?.(asError(error).message);
+      // A read error during teardown is expected. Anything else, while we still
+      // believe the link is up, is the link dying — close it, and don't start
+      // a second teardown if one is already running.
+      if (this.status === 'connected' && !this.teardownStarted) {
+        const message = asError(error).message;
+        this.handlers.onError?.(message);
+        void this.teardown(message);
       }
     } finally {
       try {
@@ -182,7 +251,18 @@ export class Fy3200sTransport {
     await this.teardown();
   }
 
-  private async teardown(detail?: string): Promise<void> {
+  private teardown(detail?: string): Promise<void> {
+    if (this.teardownStarted) return this.teardownTask ?? Promise.resolve();
+    this.teardownStarted = true;
+    const task = this.finishTeardown(detail).finally(() => {
+      this.teardownStarted = false;
+      this.teardownTask = null;
+    });
+    this.teardownTask = task;
+    return task;
+  }
+
+  private async finishTeardown(detail?: string): Promise<void> {
     this.queue = [];
     const port = this.port;
     this.port = null;

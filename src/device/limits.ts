@@ -86,6 +86,35 @@ export function clampOffset(volts: number): number {
   return quantize(clamp(volts, -MAX_OFFSET_V, MAX_OFFSET_V), OFFSET_STEP_V);
 }
 
+export interface OutputLevels {
+  amplitudeVpp: number;
+  offsetV: number;
+}
+
+/**
+ * Amplitude and offset share one ±10 V window: |offset| + Vpp/2 <= 10 V.
+ *
+ * Each control's own datasheet range still applies (20 Vpp, ±10 V), but those
+ * two ranges are not simultaneously legal — 20 Vpp already uses the whole
+ * window, so any offset would drive a peak past ±10 V. Amplitude is kept
+ * (after its own clamp) and offset is pulled in to fit. The reduced numbers
+ * are what the UI shows.
+ */
+export function clampOutput(amplitudeVpp: number, offsetV: number): OutputLevels {
+  const amplitude = clampAmplitude(amplitudeVpp);
+  const maxUnits = Math.round(MAX_OFFSET_V / OFFSET_STEP_V);
+  const ampUnits = Math.round(amplitude / AMPLITUDE_STEP_V);
+  // Odd amplitudes are not an even number of steps around zero. Reserve a
+  // whole step of headroom so quantizing the offset cannot push a peak past
+  // ±10 V.
+  const halfUnits = Math.ceil(ampUnits / 2);
+  const offsetLimit = Math.max(0, maxUnits - halfUnits) * OFFSET_STEP_V;
+  return {
+    amplitudeVpp: amplitude,
+    offsetV: quantize(clamp(offsetV, -offsetLimit, offsetLimit), OFFSET_STEP_V),
+  };
+}
+
 export function clampDuty(pct: number): number {
   return quantize(clamp(pct, MIN_DUTY_PCT, MAX_DUTY_PCT), DUTY_STEP_PCT);
 }

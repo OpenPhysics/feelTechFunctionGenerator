@@ -103,6 +103,12 @@ export interface ChannelState {
   dutyPct: number;
   /** Degrees. Channel 2 only - channel 1 is the phase reference. */
   phaseDeg: number;
+  /**
+   * True when the last normalisation had to lower `frequencyHz` to this
+   * waveform's ceiling. The stored frequency is already legal, so the preview
+   * banner cannot detect the reduction by comparing it with the cap.
+   */
+  frequencyReduced: boolean;
 }
 
 export interface InstrumentState {
@@ -118,6 +124,7 @@ export function defaultChannelState(): ChannelState {
     offsetV: 0,
     dutyPct: 50,
     phaseDeg: 0,
+    frequencyReduced: false,
   };
 }
 

@@ -116,6 +116,10 @@ connectButton.addEventListener('click', () => {
   // click is still considered a user gesture.
   transport.connect().then(
     () => {
+      // A click that arrived while a reconnect was already opening the port
+      // returns without starting a second open. Only the attempt that actually
+      // connected should push settings.
+      if (!transport.isConnected) return;
       log.add('info', 'connected at 9600 baud, 8N1');
       // The instrument has no way to report its waveform, amplitude or offset,
       // so the only way to make hardware and page agree is to push our state.

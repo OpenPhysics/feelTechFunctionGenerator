@@ -15,7 +15,7 @@ import {
   type ChannelId, type ChannelState, type InstrumentState, type WaveformCode,
 } from './types.ts';
 import {
-  clampAmplitude, clampDuty, clampFrequency, clampOffset, clampPhase,
+  clampDuty, clampFrequency, clampOutput, clampPhase,
   type ModelId,
 } from './limits.ts';
 
@@ -149,11 +149,12 @@ export function parseCounterReply(reply: string): number | null {
 export function encodeChannel(
   channel: ChannelId, state: ChannelState, model: ModelId,
 ): string[] {
+  const levels = clampOutput(state.amplitudeVpp, state.offsetV);
   const cmds = [
     encodeWaveform(channel, state.waveform),
     encodeFrequency(channel, clampFrequency(state.frequencyHz, model, state.waveform)),
-    encodeAmplitude(channel, clampAmplitude(state.amplitudeVpp)),
-    encodeOffset(channel, clampOffset(state.offsetV)),
+    encodeAmplitude(channel, levels.amplitudeVpp),
+    encodeOffset(channel, levels.offsetV),
   ];
   if (waveformInfo(state.waveform).hasDuty) {
     cmds.push(encodeDuty(channel, clampDuty(state.dutyPct)));
@@ -193,13 +194,14 @@ export function diffChannel(
     cmds.push(encodeFrequency(channel, nextFreq));
   }
 
-  const prevAmp = clampAmplitude(prev.amplitudeVpp);
-  const nextAmp = clampAmplitude(next.amplitudeVpp);
-  if (prevAmp !== nextAmp) cmds.push(encodeAmplitude(channel, nextAmp));
-
-  const prevOff = clampOffset(prev.offsetV);
-  const nextOff = clampOffset(next.offsetV);
-  if (prevOff !== nextOff) cmds.push(encodeOffset(channel, nextOff));
+  const prevLevels = clampOutput(prev.amplitudeVpp, prev.offsetV);
+  const nextLevels = clampOutput(next.amplitudeVpp, next.offsetV);
+  if (prevLevels.amplitudeVpp !== nextLevels.amplitudeVpp) {
+    cmds.push(encodeAmplitude(channel, nextLevels.amplitudeVpp));
+  }
+  if (prevLevels.offsetV !== nextLevels.offsetV) {
+    cmds.push(encodeOffset(channel, nextLevels.offsetV));
+  }
 
   if (waveformInfo(next.waveform).hasDuty) {
     const prevDuty = clampDuty(prev.dutyPct);

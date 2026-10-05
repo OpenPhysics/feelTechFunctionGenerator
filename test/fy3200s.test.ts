@@ -6,7 +6,7 @@ import {
 } from '../src/device/fy3200s.ts';
 import {
   clampFrequency, maxFrequencyHz, clampAmplitude, clampOffset, clampDuty,
-  clampPhase, quantize,
+  clampOutput, clampPhase, quantize,
 } from '../src/device/limits.ts';
 import {
   WAVEFORMS, Waveform, defaultChannelState, defaultInstrumentState, type ChannelState,
@@ -189,6 +189,28 @@ describe('limits', () => {
     expect(clampDuty(100)).toBe(99.9);
   });
 
+  it('keeps offset + half the amplitude inside the ±10 V window', () => {
+    // 20 Vpp already spans the whole window, so an offset cannot be added.
+    expect(clampOutput(20, 5)).toEqual({ amplitudeVpp: 20, offsetV: 0 });
+    expect(clampOutput(20, -4)).toEqual({ amplitudeVpp: 20, offsetV: 0 });
+    // 10 Vpp leaves ±5 V of offset. A request of 8 V is pulled back to 5 V.
+    expect(clampOutput(10, 8)).toEqual({ amplitudeVpp: 10, offsetV: 5 });
+    expect(clampOutput(10, -8)).toEqual({ amplitudeVpp: 10, offsetV: -5 });
+    // A legal pair is left alone, including the 0–5 V logic preset.
+    expect(clampOutput(5, 2.5)).toEqual({ amplitudeVpp: 5, offsetV: 2.5 });
+    expect(clampOutput(0.01, 9.99)).toEqual({ amplitudeVpp: 0.01, offsetV: 9.99 });
+  });
+
+  it('never lets a quantized pair push a peak past ±10 V', () => {
+    for (const amplitude of [0.01, 0.03, 1, 10, 19.99, 20]) {
+      for (const offset of [-10, -0.01, 0, 0.01, 8, 10]) {
+        const levels = clampOutput(amplitude, offset);
+        const peak = Math.abs(levels.offsetV) + levels.amplitudeVpp / 2;
+        expect(peak).toBeLessThanOrEqual(10 + 1e-9);
+      }
+    }
+  });
+
   it('wraps phase instead of clamping it', () => {
     expect(clampPhase(370)).toBe(10);
     expect(clampPhase(-90)).toBe(270);
@@ -227,6 +249,13 @@ describe('channel sync', () => {
   it('sets phase on channel 2 only', () => {
     expect(encodeChannel(1, defaultChannelState(), '24M').some((c) => c.includes('p'))).toBe(false);
     expect(encodeChannel(2, defaultChannelState(), '24M')).toContain('dp0');
+  });
+
+  it('reduces the offset on the wire when the pair would exceed ±10 V', () => {
+    const state = { ...defaultChannelState(), amplitudeVpp: 20, offsetV: 5 };
+    const cmds = encodeChannel(1, state, '24M');
+    expect(cmds).toContain('ba20.00');
+    expect(cmds).toContain('bo0.00');
   });
 
   it('syncs both channels', () => {
